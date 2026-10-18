@@ -101,7 +101,14 @@ class ChatService:
     ) -> dict[str, Any]:
         conversation_id = conversation["conversation_id"]
         customer_id = conversation.get("customer_id") or self.repository.demo_customer_id
-        executor = ToolExecutor(self.repository, conversation_id, customer_id)
+        turn_id = uuid.uuid4().hex
+        executor = ToolExecutor(
+            self.repository,
+            conversation_id,
+            customer_id,
+            current_user_message=user_message,
+            turn_id=turn_id,
+        )
         messages = self._llm_history(history)
         language_names = {
             "en": "English",
@@ -134,27 +141,48 @@ class ChatService:
         tracking: dict[str, Any] | None = None
         response_text = ""
         cart_mutated = False
+        created_order: dict[str, Any] | None = None
+        verified_order: dict[str, Any] | None = None
+        checkout_prepared = False
+        assistant_finalized = False
 
         for round_index in range(5):
             try:
                 response = self.llm_provider.generate_response(messages, tools=TOOL_DECLARATIONS)
             except AIServiceError:
-                if not cart_mutated:
+                if not cart_mutated and not created_order and not verified_order:
                     raise
-                response_text = (
-                    "Your cart was updated successfully. The AI response is temporarily unavailable, "
-                    "so please review your cart before checking out."
-                )
+                if created_order:
+                    response_text = (
+                        f"Your order {created_order['id']} is ready with payment pending. "
+                        f"Complete demo payment here: {created_order['payment_url']}"
+                    )
+                elif verified_order:
+                    response_text = "I checked the payment provider status for your order."
+                else:
+                    response_text = (
+                        "Your cart was updated successfully. The AI response is temporarily unavailable, "
+                        "so please review your cart before checking out."
+                    )
                 break
             response_text = response.content.strip()
             if not response.tool_calls:
+                assistant_finalized = True
                 break
             if round_index == 4:
-                response_text = (
-                    "Your cart was updated successfully. Please review it before checking out."
-                    if cart_mutated
-                    else "I couldn't complete that request just now. Please try again, or use the catalog, cart, and checkout controls."
-                )
+                if created_order:
+                    response_text = (
+                        f"Your order {created_order['id']} is ready with payment pending. "
+                        f"Complete demo payment here: {created_order['payment_url']}"
+                    )
+                elif verified_order:
+                    response_text = "I checked the payment provider status for your order."
+                else:
+                    response_text = (
+                        "Your cart was updated successfully. Please review it before checking out."
+                        if cart_mutated
+                        else "I couldn't complete that request just now. Please try again, or use the catalog, cart, and checkout controls."
+                    )
                 break
 
             calls = [
@@ -178,6 +206,12 @@ class ChatService:
                 result = executor.execute(call["name"], call["arguments"])
                 if call["name"] in {"add_to_cart", "update_cart_item", "remove_from_cart"} and "error" not in result:
                     cart_mutated = True
+                if call["name"] == "place_order" and "order" in result:
+                    created_order = result["order"]
+                if call["name"] == "verify_latest_payment" and "order" in result:
+                    verified_order = result["order"]
+                if call["name"] == "prepare_order" and "checkout" in result:
+                    checkout_prepared = True
                 result_text = json.dumps(result, ensure_ascii=False)
                 results.append(
                     {
@@ -207,6 +241,44 @@ class ChatService:
         else:
             raise AIServiceError("I couldn't prepare a response just now. Please try again.")
 
+        if created_order and created_order["payment_url"] not in response_text:
+            response_text = (
+                f"{response_text}\n\nOrder {created_order['id']} is awaiting payment. "
+                f"Complete demo payment here: {created_order['payment_url']}"
+            )
+        if verified_order:
+            status = verified_order.get("payment_status")
+            if status == "paid":
+                items = ", ".join(
+                    f"{item['product_name']} × {item['quantity']}"
+                    for item in verified_order.get("items", [])
+                )
+                verification = (
+                    f"Verified order {verified_order['id']}: {items}; "
+                    f"total {verified_order['currency']} {verified_order['total']}; "
+                    f"order status {verified_order['order_status']}."
+                )
+                if (
+                    verified_order["id"] not in response_text
+                    or str(verified_order["total"]) not in response_text
+                    or any(item["product_name"] not in response_text for item in verified_order.get("items", []))
+                ):
+                    response_text = f"{response_text}\n\n{verification}"
+            elif status in {"failed", "cancelled"}:
+                if (
+                    verified_order["payment_url"] not in response_text
+                    or not any(phrase in response_text.lower() for phrase in ("try again", "retry"))
+                ):
+                    response_text = (
+                        f"{response_text}\n\nPayment failed for order {verified_order['id']}. "
+                        f"Please try again using this demo payment link: {verified_order['payment_url']}"
+                    )
+            elif status == "pending":
+                if verified_order["payment_url"] not in response_text:
+                    response_text = (
+                        f"{response_text}\n\nPayment for order {verified_order['id']} is not verified yet. "
+                        f"Please complete payment here: {verified_order['payment_url']}"
+                    )
         if not response_text:
             raise AIServiceError("I couldn't prepare a response just now. Please try again.")
 
@@ -220,19 +292,31 @@ class ChatService:
                 "content": response_text,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "tool_steps": tool_steps,
+                "order": created_order or verified_order,
             }
         )
-        self.repository.update_conversation(
-            conversation_id,
-            {"messages": history, "cart": cart_summary},
-        )
+        conversation_update: dict[str, Any] = {"messages": history, "cart": cart_summary}
+        current_conversation = self.repository.get_conversation(conversation_id)
+        pending_checkout = current_conversation.get("pending_checkout") if current_conversation else None
+        if (
+            checkout_prepared
+            and assistant_finalized
+            and pending_checkout
+            and pending_checkout.get("prepared_turn_id") == turn_id
+        ):
+            conversation_update["pending_checkout"] = {
+                **pending_checkout,
+                "summary_presented": True,
+            }
+        self.repository.update_conversation(conversation_id, conversation_update)
         return {
             "response": response_text,
             "conversation_id": conversation_id,
             "product_cards": product_cards,
             "cart": cart_summary,
-            "order_summary": None,
-            "payment_link": None,
+            "order_summary": created_order,
+            "payment_link": created_order.get("payment_url") if created_order else None,
+            "order": created_order or verified_order,
             "tracking": tracking,
         }
 
@@ -317,21 +401,21 @@ class ChatService:
                 response_text = f"I removed {product['name']} from your cart."
             else:
                 response_text = "I couldn't find that product in your cart."
-        elif "place the order" in lower or "checkout" in lower or "place order" in lower:
-            preview = self.order_service.preview_order(conversation["conversation_id"], shipping_address=self.repository.get_customer(self.repository.demo_customer_id).get("shipping_address"))
-            order_summary = preview
-            response_text = "Of course! Here is your order summary. Please confirm the products, quantities, delivery address, and total before I create the order."
-        elif "confirm" in lower and "order" in lower:
-            order = self.order_service.create_order(conversation["conversation_id"], customer_id=self.repository.demo_customer_id, confirmed=True)
-            payment_link = order.get("payment_url")
-            order_summary = {
-                "order_id": order["id"],
-                "total": order["total"],
-                "currency": order["currency"],
-                "payment_url": order.get("payment_url"),
-                "status": order.get("order_status"),
-            }
-            response_text = "Your order is ready! 🎉\n\nOrder ID: " + order["id"] + "\nTotal: ₹" + str(order["total"]) + "\nComplete your demo checkout here: " + str(order.get("payment_url")) + "\nOnce payment is confirmed, I can help you check your order status."
+        elif any(phrase in lower for phrase in ("place the order", "checkout", "place order", "confirm order")):
+            response_text = (
+                "Conversational checkout requires the Gemini AI provider. Set LLM_PROVIDER=gemini "
+                "with a valid API key and model to collect delivery details and place an order safely. "
+                "This offline mode will not create an order."
+            )
+        elif "order history" in lower or "my orders" in lower or lower.strip() == "orders":
+            order_list = self.order_service.list_customer_orders(self.repository.demo_customer_id)
+            if order_list["order_history"]:
+                response_text = "Your orders: " + "; ".join(
+                    f"{order['id']} — {order['order_status']} (payment {order['payment_status']})"
+                    for order in order_list["order_history"]
+                )
+            else:
+                response_text = "You don't have any orders yet."
         elif "where is my order" in lower or "tracking" in lower or "status" in lower:
             order_id_match = re.search(r"TN-[A-Z0-9-]+", user_message.upper())
             order_id = order_id_match.group(0) if order_id_match else None
@@ -341,6 +425,7 @@ class ChatService:
                     order = orders[-1]
                     order_id = order["id"]
             if order_id:
+                self.order_service.refresh_payment_status(order_id, customer_id=self.repository.demo_customer_id)
                 tracking = self.order_service.get_tracking_information(order_id, customer_id=self.repository.demo_customer_id)
                 response_text = f"Your latest order {order_id} is currently {tracking['status']} and you can track it here: {tracking['tracking_url']}"
             else:

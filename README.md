@@ -4,17 +4,16 @@ This project is a FastAPI-based backend for a Thai Naturals skincare shopping as
 
 A separate TanStack Start frontend is available in [`frontend/`](./frontend/README.md) for exercising the API through a small shopping-assistant interface.
 
-The current `/chat` service is a deterministic demo conversation flow and does not yet call Gemini; configuring a Gemini key alone will not make chat replies model-generated.
-
 ## Features
 
 - Product catalog with 10 demo skincare products
 - Product search and recommendation logic
 - Conversational chat flow with history persistence
 - Cart management and total calculation
-- Order preview and confirmation flow
+- AI-guided checkout with customer contact and delivery details
+- Explicit order confirmation before order creation
 - Demo payment link generation
-- Order status and tracking responses
+- Payment-status verification, active orders, order history, and tracking
 - Swagger UI via FastAPI docs
 
 ## Project structure
@@ -58,7 +57,7 @@ GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=your_available_model_name
 ```
 
-With Gemini selected, chat requests use the Google Gen AI SDK and its tool calls to retrieve catalog details, recommend products, and perform validated cart operations. Checkout remains a separate confirmed API flow; the model cannot create orders or mark demo payments as paid.
+With Gemini selected, chat requests use the Google Gen AI SDK and its tools to retrieve catalog details, recommend products, perform validated cart operations, and guide checkout. The assistant collects the customer's name, email, phone number, and delivery address; presents a backend-calculated order summary; then waits for explicit confirmation in a later message before creating an order and payment link. Payment status is read from the configured provider; the demo provider only supports simulated payments.
 
 5. Start the server:
 
@@ -81,7 +80,7 @@ npm run dev
 
 Open `http://localhost:3000`. The frontend defaults to `http://localhost:8000` for the API. Set `VITE_API_BASE_URL` in `frontend/.env` if the backend is running elsewhere. The backend's `CORS_ORIGINS` setting must include the frontend's origin when using another port or hostname.
 
-The frontend provides the chat and conversation-history flow, searchable product catalog and details, cart quantity controls, order preview and confirmation, payment-link display, demo-payment simulation, and order/tracking lookup. All payment and tracking actions are simulations; the backend's in-memory data is lost when it restarts.
+The frontend provides chat-guided checkout, searchable product catalog and details, cart quantity controls, order payment links, a demo payment page with successful/failed outcomes, active orders and history, payment-status refresh, and order/tracking lookup. Customers can return to chat and use the payment-verification action to have the assistant check provider status. Payment and tracking are simulations; order/contact data uses in-memory storage and is cleared when the backend restarts. The current demo uses one shared customer identity and is not suitable for production or real payments.
 
 ## Example requests
 
@@ -126,7 +125,19 @@ Create a confirmed order:
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/orders \
   -H "Content-Type: application/json" \
-  -d '{"conversation_id":"conv_123","confirmed":true}'
+  -d '{"conversation_id":"conv_123","customer_name":"Demo Customer","email":"customer@example.com","phone":"+91 98765 43210","shipping_address":"12 Lotus Avenue, Bengaluru, Karnataka 560001","confirmed":true}'
+```
+
+List active orders and order history:
+
+```bash
+curl http://127.0.0.1:8000/api/v1/orders
+```
+
+Verify payment status with the configured provider:
+
+```bash
+curl http://127.0.0.1:8000/api/v1/orders/TN-12345678/payment-status
 ```
 
 Check tracking:
@@ -144,5 +155,6 @@ pytest -q
 ## Notes
 
 - This project intentionally uses an in-memory repository to keep setup simple and demo-friendly.
-- Payment and order tracking are clearly labeled as demo/simulation flows.
+- The demo provider does not collect real payments; use the order view's simulation control to test a successful payment.
+- Customer identity is shared in this demo. Do not use this flow for real customer data until authentication, customer-scoped storage, and a real payment provider/webhook are configured.
 - The architecture is designed to be replaceable with a real persistent database, real payment provider, or LLM adapter.

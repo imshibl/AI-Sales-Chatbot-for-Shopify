@@ -11,7 +11,7 @@ class DummyPaymentProvider(PaymentProvider):
 
     def create_payment_link(self, order: dict[str, Any]) -> dict[str, Any]:
         payment_reference = f"DEMO-{order['id']}-{abs(hash(order['id'])) % 100000}"
-        payment_url = f"https://demo.thainaturals.local/payments/{payment_reference}?demo=1"
+        payment_url = f"/payment/{payment_reference}"
         self._statuses[payment_reference] = "pending"
         return {
             "payment_reference": payment_reference,
@@ -24,4 +24,12 @@ class DummyPaymentProvider(PaymentProvider):
 
     def simulate_success(self, payment_reference: str) -> str:
         self._statuses[payment_reference] = "paid"
+        return self._statuses[payment_reference]
+
+    def simulate_failure(self, payment_reference: str) -> str:
+        self._statuses[payment_reference] = "failed"
+        return self._statuses[payment_reference]
+
+    def reset(self, payment_reference: str) -> str:
+        self._statuses[payment_reference] = "pending"
         return self._statuses[payment_reference]

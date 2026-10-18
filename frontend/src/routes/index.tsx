@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 const API = `${API_BASE}/api/v1`
 const CONVERSATION_STORAGE_KEY = 'thai-naturals-conversation'
-const ORDERS_STORAGE_KEY = 'thai-naturals-orders'
 const LANGUAGE_STORAGE_KEY = 'thai-naturals-language'
 
 type Product = {
@@ -44,6 +43,7 @@ type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   timestamp?: string
+  order?: { id: string; payment_url: string; payment_status: string; order_status: string }
   clientId?: string
   pending?: boolean
   failed?: boolean
@@ -139,6 +139,11 @@ type Order = {
   currency: string
   order_status: string
   payment_status: string
+  created_at?: string
+  customer_name?: string
+  email?: string
+  phone?: string
+  shipping_address?: string
   payment_url?: string
   tracking_url?: string
   tracking_number?: string
@@ -177,9 +182,14 @@ function shortDate(value?: string) {
 }
 
 function renderMessageContent(content: string) {
-  return content.split(/(\*\*.+?\*\*)/gs).map((part, index) => {
+  return content.split(/(\*\*.+?\*\*|https?:\/\/[^\s<>()]+)/gs).map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={index}>{part.slice(2, -2)}</strong>
+    }
+    if (/^https?:\/\//i.test(part)) {
+      const url = part.replace(/[.,!?;:]+$/, '')
+      const trailingPunctuation = part.slice(url.length)
+      return <span key={index}><a href={url} target="_blank" rel="noreferrer">{url}</a>{trailingPunctuation}</span>
     }
     return part
   })
@@ -207,8 +217,9 @@ function Home() {
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking')
   const [error, setError] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [preview, setPreview] = useState<Record<string, any> | null>(null)
   const [latestOrder, setLatestOrder] = useState<Order | null>(null)
+  const [activeOrders, setActiveOrders] = useState<Order[]>([])
+  const [orderHistory, setOrderHistory] = useState<Order[]>([])
   const [orderIdInput, setOrderIdInput] = useState('')
   const [tracking, setTracking] = useState<Record<string, any> | null>(null)
   const [busyAction, setBusyAction] = useState('')
@@ -267,6 +278,19 @@ function Home() {
     return response.cart
   }, [conversationId])
 
+  const refreshOrders = useCallback(async () => {
+    const result = await apiRequest<{ active_orders: Order[]; order_history: Order[] }>('/orders')
+    setActiveOrders(result.active_orders)
+    setOrderHistory(result.order_history)
+    setLatestOrder((current) => (
+      (current && result.order_history.find((order) => order.id === current.id))
+      || result.active_orders[0]
+      || result.order_history[0]
+      || null
+    ))
+    return result
+  }, [])
+
   const loadHistory = useCallback(async (id: string) => {
     const response = await apiRequest<{ conversation_id: string; messages: ChatMessage[] }>(`/chat/${encodeURIComponent(id)}/history`)
     setMessages(response.messages)
@@ -297,8 +321,7 @@ function Home() {
         setCart({})
       })
     }
-    const storedOrders = JSON.parse(window.localStorage.getItem(ORDERS_STORAGE_KEY) || '[]') as Order[]
-    if (storedOrders.length) setLatestOrder(storedOrders[0])
+    window.localStorage.removeItem('thai-naturals-orders')
     return () => { mounted = false }
   }, [loadHistory, refreshProducts])
 
@@ -309,6 +332,13 @@ function Home() {
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, loading])
+
+  useEffect(() => {
+    if (activeView !== 'orders') return
+    void refreshOrders().catch((cause) => {
+      setError(cause instanceof Error ? cause.message : 'Could not load order history.')
+    })
+  }, [activeView, refreshOrders])
 
   async function ensureConversation() {
     if (conversationId) return conversationId
@@ -351,6 +381,7 @@ function Home() {
         conversation_id: string
         product_cards: ProductCard[]
         cart: Cart
+        order?: ChatMessage['order']
       }>('/chat', {
         method: 'POST',
         body: JSON.stringify({ conversation_id: conversationId || null, message, language }),
@@ -358,8 +389,12 @@ function Home() {
       setConversationId(result.conversation_id)
       window.localStorage.setItem(CONVERSATION_STORAGE_KEY, result.conversation_id)
       setMessages((current) => [
-        ...current.map((item) => item.clientId === clientId ? { ...item, pending: false } : item),
-        { role: 'assistant', content: result.response, timestamp: new Date().toISOString() },
+        ...current.map((item) => {
+          if (item.clientId === clientId) return { ...item, pending: false }
+          if (result.order && item.order?.id === result.order.id) return { ...item, order: result.order }
+          return item
+        }),
+        { role: 'assistant', content: result.response, timestamp: new Date().toISOString(), order: result.order },
       ])
       setProductCards(result.product_cards || [])
       setCart(result.cart || {})
@@ -387,7 +422,6 @@ function Home() {
       setMessages([])
       setCart({})
       setProductCards([])
-      setPreview(null)
       setActiveView('chat')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not clear this conversation.')
@@ -431,48 +465,6 @@ function Home() {
     }
   }
 
-  async function previewOrder() {
-    if (!conversationId) {
-      setError('Start a conversation and add a product before checkout.')
-      return
-    }
-    setError('')
-    setBusyAction('preview')
-    try {
-      const result = await apiRequest<Record<string, any>>('/orders/preview', {
-        method: 'POST',
-        body: JSON.stringify({ conversation_id: conversationId }),
-      })
-      setPreview(result)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not preview this order.')
-    } finally {
-      setBusyAction('')
-    }
-  }
-
-  async function confirmOrder() {
-    if (!conversationId) return
-    setError('')
-    setBusyAction('order')
-    try {
-      const order = await apiRequest<Order>('/orders', {
-        method: 'POST',
-        body: JSON.stringify({ conversation_id: conversationId, confirmed: true }),
-      })
-      setLatestOrder(order)
-      const saved = JSON.parse(window.localStorage.getItem(ORDERS_STORAGE_KEY) || '[]') as Order[]
-      window.localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify([order, ...saved.filter((item) => item.id !== order.id)]))
-      setPreview(null)
-      setActiveView('orders')
-      await refreshCart()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not create your order.')
-    } finally {
-      setBusyAction('')
-    }
-  }
-
   async function lookupOrder(id = orderIdInput) {
     const orderId = id.trim()
     if (!orderId) {
@@ -489,24 +481,9 @@ function Home() {
       setLatestOrder(orderResponse.order)
       setTracking(trackingResponse)
       setOrderIdInput(orderResponse.order.id)
-      const saved = JSON.parse(window.localStorage.getItem(ORDERS_STORAGE_KEY) || '[]') as Order[]
-      window.localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify([orderResponse.order, ...saved.filter((item) => item.id !== orderResponse.order.id)]))
+      await refreshOrders()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not find this order.')
-    } finally {
-      setBusyAction('')
-    }
-  }
-
-  async function simulatePayment(order: Order) {
-    setError('')
-    setBusyAction('payment')
-    try {
-      const result = await apiRequest<{ order: Order }>(`/demo/payments/${encodeURIComponent(order.id)}/simulate-success`, { method: 'POST' })
-      setLatestOrder(result.order)
-      await lookupOrder(result.order.id)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not simulate payment.')
     } finally {
       setBusyAction('')
     }
@@ -538,6 +515,23 @@ function Home() {
           {!compact && <div className="stock-hint">{product.stock_quantity ?? product.availability ?? 'Availability in catalog'} · Sample product data</div>}
         </div>
       </article>
+    )
+  }
+
+  function renderOrderRow(order: Order) {
+    const items = order.items?.map((item) => `${item.product_name} × ${item.quantity}`).join(', ') || 'Order items'
+    return (
+      <button className="order-history-row" key={order.id} onClick={() => void lookupOrder(order.id)}>
+        <span className="order-history-main">
+          <strong>{order.id}</strong>
+          <small>{order.created_at ? `${new Date(order.created_at).toLocaleDateString()} · ` : ''}{items}</small>
+        </span>
+        <span className="order-history-state">
+          <span className={`order-status status-${order.order_status}`}>{order.order_status.replaceAll('_', ' ')}</span>
+          <small>Payment {order.payment_status}</small>
+        </span>
+        <strong className="order-history-total">{money(order.total, order.currency)}</strong>
+      </button>
     )
   }
 
@@ -603,6 +597,15 @@ function Home() {
                     <div className="message-content">
                       <div className="message-meta">{message.role === 'assistant' ? copy.assistant : 'YOU'} <span>{message.pending ? copy.sending : message.failed ? copy.failed : shortDate(message.timestamp)}</span></div>
                       <p>{renderMessageContent(message.content)}</p>
+                      {message.role === 'assistant' && message.order && message.order.payment_status !== 'paid' && (
+                        <button
+                          className="payment-verify-chat"
+                          onClick={() => void sendMessage(`I have completed the demo payment for order ${message.order?.id}. Please verify the payment status.`)}
+                          disabled={loading}
+                        >
+                          I’ve paid — verify my order
+                        </button>
+                      )}
                       {message.failed && <button className="retry-message" onClick={() => retryMessage(message)} disabled={loading}>{copy.retry}</button>}
                     </div>
                     {message.role === 'user' && <div className="user-avatar">Y</div>}
@@ -691,14 +694,8 @@ function Home() {
                   <div className="summary-title">ORDER SUMMARY</div>
                   {cartItems.map(({ product, quantity }) => <div className="summary-line" key={product.id}><span>{product.name} <small>× {quantity}</small></span><strong>{money(product.price * quantity)}</strong></div>)}
                   <div className="summary-divider" />
-                  <button className="button button-outline full-button" onClick={() => void previewOrder()} disabled={busyAction === 'preview'}>{busyAction === 'preview' ? 'Checking…' : 'Preview checkout'}</button>
-                  {preview && <div className="preview-box">
-                    <div className="summary-line"><span>Subtotal</span><strong>{money(preview.subtotal)}</strong></div>
-                    <div className="summary-line"><span>Shipping</span><strong>{preview.shipping_fee ? money(preview.shipping_fee) : 'Free'}</strong></div>
-                    <div className="summary-line total-line"><span>Total</span><strong>{money(preview.total, preview.currency)}</strong></div>
-                    <p className="demo-note">Demo order only. No real payment will be collected.</p>
-                    <button className="button button-dark full-button" onClick={() => void confirmOrder()} disabled={busyAction === 'order'}>{busyAction === 'order' ? 'Creating order…' : 'Confirm & create order'}</button>
-                  </div>}
+                  <p className="demo-note">Ready to check out? Tell the assistant “I’d like to place my order” and it will collect delivery details, confirm the total, and create your payment link.</p>
+                  <button className="button button-dark full-button" onClick={() => setActiveView('chat')}>Checkout with the assistant</button>
                 </div>
               </div>
             )}
@@ -708,7 +705,15 @@ function Home() {
         {activeView === 'orders' && (
           <section className="view-content">
             <div className="section-heading">
-              <div><div className="eyebrow">HERE WHEN YOU NEED US</div><h1>Orders & <em>tracking.</em></h1><p>Look up your demo order or simulate a checkout.</p></div>
+              <div><div className="eyebrow">HERE WHEN YOU NEED US</div><h1>Orders & <em>tracking.</em></h1><p>Active orders, payment status, and your order history.</p></div>
+            </div>
+            <div className="order-history-section">
+              <div className="order-history-heading"><h2>Active orders</h2><button className="text-link" onClick={() => void refreshOrders()}>Refresh ↻</button></div>
+              {activeOrders.length ? <div className="order-history-list">{activeOrders.map(renderOrderRow)}</div> : <p className="order-history-empty">No active orders yet. Start a checkout in the assistant chat.</p>}
+            </div>
+            <div className="order-history-section">
+              <div className="order-history-heading"><h2>Order history</h2><span>{orderHistory.length} orders</span></div>
+              {orderHistory.length ? <div className="order-history-list">{orderHistory.map(renderOrderRow)}</div> : <p className="order-history-empty">Completed and pending orders will appear here.</p>}
             </div>
             <div className="order-lookup">
               <span>⌕</span><input value={orderIdInput} onChange={(event) => setOrderIdInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void lookupOrder() }} placeholder="Enter your order ID, e.g. TN-AB12CD34" />
@@ -719,10 +724,10 @@ function Home() {
               <div className="order-item-list">{latestOrder.items?.map((item) => <div className="summary-line" key={item.product_id}><span>{item.product_name} <small>× {item.quantity}</small></span><strong>{money(item.line_total)}</strong></div>)}</div>
               <div className="order-total"><span>Total</span><strong>{money(latestOrder.total, latestOrder.currency)}</strong></div>
               <div className="payment-state"><span className={latestOrder.payment_status === 'paid' ? 'payment-check' : 'payment-pending'}>{latestOrder.payment_status === 'paid' ? '✓' : '○'}</span><div><strong>Demo payment {latestOrder.payment_status}</strong><small>This is a simulation, not a real transaction.</small></div></div>
-              {latestOrder.payment_url && latestOrder.payment_status !== 'paid' && <div className="order-actions"><a className="button button-outline" href={latestOrder.payment_url} target="_blank" rel="noreferrer">Open demo payment link ↗</a><button className="button button-dark" onClick={() => void simulatePayment(latestOrder)} disabled={busyAction === 'payment'}>{busyAction === 'payment' ? 'Simulating…' : 'Simulate payment success'}</button></div>}
-              {(tracking || latestOrder.tracking_url) && <div className="tracking-box"><span className="tracking-icon">↗</span><div><strong>Demo tracking</strong><small>{tracking?.tracking_number || latestOrder.tracking_number || 'Tracking will be available after payment.'}</small></div>{(tracking?.tracking_url || latestOrder.tracking_url) && <a href={tracking?.tracking_url || latestOrder.tracking_url} target="_blank" rel="noreferrer">View ↗</a>}</div>}
+              {latestOrder.payment_url && latestOrder.payment_status !== 'paid' && <div className="order-actions"><a className="button button-outline" href={latestOrder.payment_url} target="_blank" rel="noreferrer">Open demo payment page ↗</a><button className="button button-dark" onClick={() => void lookupOrder(latestOrder.id)} disabled={busyAction === 'lookup'}>{busyAction === 'lookup' ? 'Checking…' : 'Check payment status'}</button></div>}
+              {(tracking?.tracking_number || latestOrder.tracking_number) && <div className="tracking-box"><span className="tracking-icon">↗</span><div><strong>Demo tracking</strong><small>{tracking?.tracking_number || latestOrder.tracking_number}</small></div>{(tracking?.tracking_url || latestOrder.tracking_url) && <a href={tracking?.tracking_url || latestOrder.tracking_url} target="_blank" rel="noreferrer">View ↗</a>}</div>}
               {latestOrder.payment_status === 'paid' && !tracking && <button className="text-link" onClick={() => void lookupOrder(latestOrder.id)}>Refresh tracking details ↻</button>}
-            </div> : <div className="empty-state order-empty"><span>↗</span><h3>No order loaded yet</h3><p>Create an order from your cart, or enter an order ID above to look it up.</p></div>}
+            </div> : <div className="empty-state order-empty"><span>↗</span><h3>No order selected</h3><p>Select an order above or enter an order ID to view its details.</p></div>}
             <div className="demo-caveat"><strong>About this demo</strong><p>Orders, payments, and tracking are simulated. The API uses in-memory storage, so data is cleared when the backend restarts.</p></div>
           </section>
         )}

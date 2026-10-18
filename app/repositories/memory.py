@@ -140,6 +140,9 @@ class MemoryRepository(BaseRepository):
             "tracking_url": payload.get("tracking_url"),
             "tracking_number": payload.get("tracking_number"),
             "shipping_address": payload.get("shipping_address", ""),
+            "customer_name": payload.get("customer_name", ""),
+            "email": payload.get("email", ""),
+            "phone": payload.get("phone", ""),
             "created_at": payload.get("created_at") or utcnow().isoformat(),
             "updated_at": payload.get("updated_at") or utcnow().isoformat(),
         }
