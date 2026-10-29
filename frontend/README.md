@@ -33,3 +33,11 @@ The frontend calls the `/chat` API. Set `LLM_PROVIDER=gemini` in the project-roo
 ```bash
 npm run build
 ```
+
+## Deploy to Vercel
+
+Import the repository into Vercel and set the project **Root Directory** to
+`frontend`. Keep the detected Nitro build configuration (build command
+`npm run build`); do not configure the app as a static site or add an
+`index.html` fallback. The Nitro Vite plugin generates the Vercel server
+function and client assets for TanStack Start.
