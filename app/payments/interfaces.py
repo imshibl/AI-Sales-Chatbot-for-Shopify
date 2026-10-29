@@ -12,3 +12,14 @@ class PaymentProvider(ABC):
     @abstractmethod
     def get_payment_status(self, payment_reference: str) -> str:
         raise NotImplementedError
+
+    def simulate_success(self, payment_reference: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def simulate_failure(self, payment_reference: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def reset(self, payment_reference: str) -> str:
+        raise NotImplementedError

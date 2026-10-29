@@ -63,18 +63,56 @@ def test_chat_creates_conversation_and_cart_flow():
     preview = preview_response.json()
     assert preview["total"] > 0
 
-    order_response = client.post("/api/v1/orders", json={"conversation_id": conversation_id, "confirmed": True})
+    order_response = client.post(
+        "/api/v1/orders",
+        json={
+            "conversation_id": conversation_id,
+            "customer_name": "Demo Customer",
+            "email": "customer@example.com",
+            "phone": "+91 98765 43210",
+            "shipping_address": "12 Lotus Avenue, Bengaluru, Karnataka 560001",
+            "confirmed": True,
+        },
+    )
     assert order_response.status_code == 200
     order = order_response.json()
     assert order["payment_url"]
     assert order["id"].startswith("TN-")
+    assert order["payment_url"] == f"/payment/{order['payment_reference']}"
     assert client.get(f"/api/v1/cart/{conversation_id}").json()["cart"] == {}
+    assert client.get("/api/v1/orders").json()["active_orders"][0]["id"] == order["id"]
+    assert client.get(f"/api/v1/orders/{order['id']}/payment-status").json()["payment_status"] == "pending"
+    demo_payment = client.get(f"/api/v1/demo/payments/{order['payment_reference']}")
+    assert demo_payment.status_code == 200
+    assert demo_payment.json()["payment_status"] == "pending"
 
     tracking_response = client.get(f"/api/v1/orders/{order['id']}/tracking")
     assert tracking_response.status_code == 200
     track = tracking_response.json()
-    assert "tracking_url" in track
+    assert track["status"] == "pending_payment"
+    assert track["tracking_url"] is None
 
-    payment_response = client.post(f"/api/v1/demo/payments/{order['id']}/simulate-success")
+    failed_payment = client.post(
+        f"/api/v1/demo/payments/{order['id']}/complete",
+        json={"outcome": "failed"},
+    )
+    assert failed_payment.status_code == 200
+    assert failed_payment.json()["payment_status"] == "failed"
+    assert client.get(f"/api/v1/orders/{order['id']}/payment-status").json()["order_status"] == "payment_failed"
+    retry_payment = client.post(
+        f"/api/v1/demo/payments/{order['id']}/complete",
+        json={"outcome": "pending"},
+    )
+    assert retry_payment.json()["payment_status"] == "pending"
+
+    payment_response = client.post(f"/api/v1/demo/payments/{order['id']}/complete", json={"outcome": "paid"})
     assert payment_response.status_code == 200
-    assert payment_response.json()["order"]["payment_status"] == "paid"
+    assert payment_response.json()["payment_status"] == "paid"
+    assert client.get(f"/api/v1/orders/{order['id']}/tracking").json()["tracking_url"]
+    verified = client.get(f"/api/v1/orders/{order['id']}/payment-status")
+    assert verified.json() == {
+        "order_id": order["id"],
+        "payment_status": "paid",
+        "order_status": "confirmed",
+    }
+    assert order["id"] in {item["id"] for item in client.get("/api/v1/orders").json()["order_history"]}
