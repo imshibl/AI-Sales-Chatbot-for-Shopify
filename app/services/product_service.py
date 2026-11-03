@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from app.core.exceptions import NotFoundError
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 
 repo = repository
 
 
 class ProductService:
-    def __init__(self, repository: MemoryRepository | None = None):
+    def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
     def list_products(self, *, category: str | None = None, skin_type: str | None = None,
-                      concern: str | None = None, max_price: int | None = None) -> list[dict]:
+                      concern: str | None = None, max_price: float | None = None) -> list[dict]:
         return self.repository.search_products(
             query=None,
             category=category,
@@ -29,7 +30,7 @@ class ProductService:
 
     def search_products(self, *, query: str | None = None, category: str | None = None,
                         skin_type: str | None = None, concern: str | None = None,
-                        max_price: int | None = None, limit: int | None = None) -> list[dict]:
+                        max_price: float | None = None, limit: int | None = None) -> list[dict]:
         results = self.repository.search_products(
             query=query,
             category=category,

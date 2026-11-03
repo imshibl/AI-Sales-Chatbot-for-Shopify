@@ -28,3 +28,8 @@ class UnauthorizedError(AppError):
 class AIServiceError(AppError):
     def __init__(self, message: str):
         super().__init__(message, status_code=503, error_code="ai_service_unavailable")
+
+
+class IntegrationError(AppError):
+    def __init__(self, message: str):
+        super().__init__(message, status_code=502, error_code="integration_error")

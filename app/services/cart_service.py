@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
+from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 
 repo = repository
 
 
 class CartService:
-    def __init__(self, repository: MemoryRepository | None = None):
+    def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
     def get_cart(self, conversation_id: str) -> dict:
@@ -29,13 +33,16 @@ class CartService:
             raise NotFoundError(f"Product '{product_id}' was not found.")
         if quantity <= 0:
             raise ValidationError("Quantity must be greater than zero.")
-        if product["stock_quantity"] < quantity:
+        if not product.get("is_active", True):
+            raise ValidationError(f"{product['name']} is unavailable.")
+        stock_quantity = product.get("stock_quantity")
+        if stock_quantity is not None and stock_quantity < quantity:
             raise ValidationError(f"Only {product['stock_quantity']} units remain for {product['name']}.")
 
         cart = conversation.get("cart", {})
         existing = cart.get(product_id, {"product_id": product_id, "quantity": 0})
         new_quantity = existing["quantity"] + quantity
-        if new_quantity > product["stock_quantity"]:
+        if stock_quantity is not None and new_quantity > stock_quantity:
             raise ValidationError(f"Cart exceeds available stock for {product['name']}.")
         existing["quantity"] = new_quantity
         cart[product_id] = existing
@@ -50,7 +57,10 @@ class CartService:
             raise NotFoundError(f"Product '{product_id}' was not found.")
         if quantity <= 0:
             raise ValidationError("Quantity must be greater than zero.")
-        if quantity > product["stock_quantity"]:
+        if not product.get("is_active", True):
+            raise ValidationError(f"{product['name']} is unavailable.")
+        stock_quantity = product.get("stock_quantity")
+        if stock_quantity is not None and quantity > stock_quantity:
             raise ValidationError(f"Only {product['stock_quantity']} units remain for {product['name']}.")
 
         cart = conversation.get("cart", {})
@@ -71,36 +81,41 @@ class CartService:
         self.repository.update_conversation(conversation_id, {"cart": cart})
         return cart
 
-    def calculate_total(self, conversation_id: str, shipping_fee: int = 50) -> dict:
+    def calculate_total(self, conversation_id: str, shipping_fee: float | int | None = None) -> dict:
         conversation = self._ensure_conversation(conversation_id)
         cart = conversation.get("cart", {})
         items = []
-        subtotal = 0
+        subtotal = Decimal("0")
 
         for product_id, entry in cart.items():
             product = self.repository.get_product(product_id)
             if not product:
                 continue
             quantity = int(entry.get("quantity", 0))
-            item_total = product["price"] * quantity
+            unit_price = Decimal(str(product["price"]))
+            item_total = unit_price * quantity
             subtotal += item_total
             items.append({
                 "product_id": product_id,
                 "product_name": product["name"],
                 "quantity": quantity,
-                "unit_price": product["price"],
-                "line_total": item_total,
+                "unit_price": _json_amount(unit_price),
+                "line_total": _json_amount(item_total),
             })
 
-        free_shipping_threshold = self.repository.store_policies.get("shipping", {}).get("free_shipping_threshold", 1499)
-        shipping = 0 if subtotal >= free_shipping_threshold else shipping_fee
+        shipping_fee = settings.default_shipping_fee if shipping_fee is None else shipping_fee
+        free_shipping_threshold = self.repository.store_policies.get("shipping", {}).get(
+            "free_shipping_threshold",
+            settings.default_free_shipping_threshold,
+        )
+        shipping = Decimal("0") if subtotal >= Decimal(str(free_shipping_threshold)) else Decimal(str(shipping_fee))
         total = subtotal + shipping
         return {
-            "subtotal": subtotal,
-            "shipping_fee": shipping,
+            "subtotal": _json_amount(subtotal),
+            "shipping_fee": _json_amount(shipping),
             "discount": 0,
-            "total": total,
-            "currency": "INR",
+            "total": _json_amount(total),
+            "currency": settings.currency,
             "items": items,
         }
 
@@ -116,6 +131,19 @@ class CartService:
             quantity = int(entry.get("quantity", 0))
             if quantity <= 0:
                 raise ValidationError(f"Invalid quantity for {product['name']}.")
-            if quantity > product["stock_quantity"]:
+            if not product.get("is_active", True):
+                raise ValidationError(f"{product['name']} is unavailable.")
+            stock_quantity = product.get("stock_quantity")
+            if stock_quantity is not None and quantity > stock_quantity:
                 raise ValidationError(f"Only {product['stock_quantity']} units remain for {product['name']}.")
-        return self.calculate_total(conversation_id, shipping_fee=self.repository.store_policies.get("shipping", {}).get("shipping_fee", 50))
+        return self.calculate_total(
+            conversation_id,
+            shipping_fee=self.repository.store_policies.get("shipping", {}).get(
+                "shipping_fee",
+                settings.default_shipping_fee,
+            ),
+        )
+
+
+def _json_amount(value: Decimal) -> int | float:
+    return int(value) if value == value.to_integral_value() else float(value)

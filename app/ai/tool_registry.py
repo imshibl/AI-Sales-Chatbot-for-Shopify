@@ -6,8 +6,9 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError, field_validator
 
+from app.core.config import settings
 from app.core.exceptions import AppError
-from app.repositories.memory import MemoryRepository
+from app.repositories.interfaces import BaseRepository
 from app.services.cart_service import CartService
 from app.services.order_service import OrderService
 from app.services.product_service import ProductService
@@ -27,7 +28,7 @@ class ProductSearchArguments(ToolArguments):
     category: str | None = None
     skin_type: str | None = None
     concern: str | None = None
-    max_price: int | None = Field(default=None, ge=0)
+    max_price: float | None = Field(default=None, ge=0)
 
 
 class ProductDetailsArguments(ToolArguments):
@@ -83,7 +84,7 @@ class CheckoutArguments(ToolArguments):
 TOOL_DECLARATIONS: list[dict[str, Any]] = [
     {
         "name": "search_products",
-        "description": "Search the live Thai Naturals demo catalog. Returns only real catalog products.",
+        "description": "Search the connected store catalog. Returns only real catalog products.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -91,7 +92,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "category": {"type": "STRING", "description": "Product category such as cleanser, serum, toner, moisturizer, sunscreen, or face mask."},
                 "skin_type": {"type": "STRING", "description": "Skin type filter such as oily, dry, combination, sensitive, or normal."},
                 "concern": {"type": "STRING", "description": "Catalog concern filter, such as dryness, dullness, oiliness, or acne marks."},
-                "max_price": {"type": "INTEGER", "description": "Maximum price in INR."},
+                "max_price": {"type": "NUMBER", "description": f"Maximum price in {settings.currency}."},
             },
         },
     },
@@ -105,7 +106,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "category": {"type": "STRING", "description": "Optional product category."},
                 "skin_type": {"type": "STRING", "description": "The customer's stated skin type."},
                 "concern": {"type": "STRING", "description": "A concern represented in catalog data."},
-                "max_price": {"type": "INTEGER", "description": "Maximum price in INR."},
+                "max_price": {"type": "NUMBER", "description": f"Maximum price in {settings.currency}."},
             },
         },
     },
@@ -262,7 +263,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
 class ToolExecutor:
     def __init__(
         self,
-        repository: MemoryRepository,
+        repository: BaseRepository,
         conversation_id: str,
         customer_id: str,
         current_user_message: str = "",

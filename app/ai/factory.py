@@ -10,7 +10,7 @@ from app.core.exceptions import AIServiceError
 
 class MockProvider(LLMProvider):
     def generate_response(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> AIResponse:
-        return AIResponse(content="I can help with your skincare shopping needs.")
+        return AIResponse(content="I can help you find products from this store.")
 
 
 def get_llm_provider() -> LLMProvider:

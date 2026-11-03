@@ -46,7 +46,7 @@ class MemoryRepository(BaseRepository):
         category: str | None = None,
         skin_type: str | None = None,
         concern: str | None = None,
-        max_price: int | None = None,
+        max_price: float | None = None,
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
         results = list(self.products.values())
@@ -60,7 +60,7 @@ class MemoryRepository(BaseRepository):
         if concern:
             results = [p for p in results if concern.lower() in [x.lower() for x in p.get("concerns", [])]]
         if max_price is not None:
-            results = [p for p in results if int(p.get("price", 0)) <= int(max_price)]
+            results = [p for p in results if float(p.get("price", 0)) <= max_price]
         if q:
             results = [
                 p
@@ -153,6 +153,13 @@ class MemoryRepository(BaseRepository):
         order = self.orders.get(order_id)
         return dict(order) if order else None
 
+    def get_order_by_payment_reference(self, payment_reference: str) -> dict[str, Any] | None:
+        order = next(
+            (item for item in self.orders.values() if item.get("payment_reference") == payment_reference),
+            None,
+        )
+        return dict(order) if order else None
+
     def get_order_by_customer(self, customer_id: str) -> list[dict[str, Any]]:
         return [dict(order) for order in self.orders.values() if order.get("customer_id") == customer_id]
 
@@ -168,6 +175,3 @@ class MemoryRepository(BaseRepository):
     @property
     def demo_customer_id(self) -> str:
         return self._demo_customer["id"]
-
-
-repository = MemoryRepository()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.core.exceptions import AppError
-from app.repositories.memory import repository as repo
+from app.repositories.factory import repository as repo
 from app.schemas.order import OrderConfirmationRequest, OrderPreviewRequest
 from app.services.order_service import OrderService
 

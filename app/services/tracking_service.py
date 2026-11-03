@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from app.core.exceptions import NotFoundError, ValidationError
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 
 repo = repository
 
 
 class TrackingService:
-    def __init__(self, repository: MemoryRepository | None = None):
+    def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
     def get_tracking(self, order_id: str, customer_id: str | None = None) -> dict:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.core.exceptions import AppError
-from app.repositories.memory import repository as repo
+from app.repositories.factory import repository as repo
 from app.schemas.chat import ChatHistoryResponse, ChatMessageRequest
 from app.services.chat_service import ChatService
 

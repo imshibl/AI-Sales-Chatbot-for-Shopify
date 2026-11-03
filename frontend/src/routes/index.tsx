@@ -3,11 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE = (
   import.meta.env.VITE_API_BASE_URL ||
-  "https://ecommerce-ai-sales-bot.vercel.app"
+  "http://localhost:8000"
 ).replace(/\/$/, "");
 const API = `${API_BASE}/api/v1`;
-const CONVERSATION_STORAGE_KEY = "thai-naturals-conversation";
-const LANGUAGE_STORAGE_KEY = "thai-naturals-language";
+const CONVERSATION_STORAGE_KEY = "sales-assistant-conversation";
+const LANGUAGE_STORAGE_KEY = "sales-assistant-language";
 
 type Product = {
   id: string;
@@ -22,7 +22,7 @@ type Product = {
   precautions: string;
   price: number;
   original_price: number;
-  stock_quantity: number;
+  stock_quantity: number | null;
   image_url?: string;
   is_active: boolean;
   rating: number;
@@ -37,7 +37,7 @@ type ProductCard = {
   benefits: string[];
   price: number;
   original_price?: number;
-  stock_quantity?: number;
+  stock_quantity?: number | null;
   image_url?: string;
   availability?: string;
 };
@@ -271,10 +271,15 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function money(amount: number, currency = "INR") {
-  return new Intl.NumberFormat("en-IN", {
+  const currencyDigits = new Intl.NumberFormat("en", {
     style: "currency",
     currency,
-    maximumFractionDigits: 0,
+  }).resolvedOptions().maximumFractionDigits;
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: Math.max(currencyDigits, 2),
   }).format(amount);
 }
 
@@ -316,6 +321,9 @@ function Home() {
     "chat" | "products" | "cart" | "orders"
   >("chat");
   const [language, setLanguage] = useState<Language>("en");
+  const [storeName, setStoreName] = useState("Thai Naturals");
+  const [currency, setCurrency] = useState("INR");
+  const [isDemoCatalog, setIsDemoCatalog] = useState(true);
   const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [productCards, setProductCards] = useState<ProductCard[]>([]);
@@ -342,8 +350,15 @@ function Home() {
   const [tracking, setTracking] = useState<Record<string, any> | null>(null);
   const [busyAction, setBusyAction] = useState("");
   const messageEndRef = useRef<HTMLDivElement>(null);
-  const currency = "INR";
-  const copy = CHAT_COPY[language];
+  const copy = useMemo(() => {
+    const source = CHAT_COPY[language];
+    return {
+      ...source,
+      intro: source.intro.replace(/thai naturals/gi, storeName),
+      assistant: source.assistant.replace(/thai naturals/gi, storeName),
+      welcome: source.welcome.replace(/thai naturals/gi, storeName),
+    };
+  }, [language, storeName]);
 
   const productById = useMemo(
     () => new Map(allProducts.map((product) => [product.id, product])),
@@ -475,6 +490,26 @@ function Home() {
       })
       .catch(() => {
         if (mounted) setApiStatus("offline");
+      });
+    void apiRequest<{
+      store_name: string;
+      currency: string;
+      is_demo_catalog: boolean;
+    }>("/config")
+      .then((config) => {
+        if (!mounted) return;
+        setStoreName(config.store_name);
+        setCurrency(config.currency);
+        setIsDemoCatalog(config.is_demo_catalog);
+      })
+      .catch((cause) => {
+        if (mounted) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not load store configuration.",
+          );
+        }
       });
     void refreshProducts();
     const storedConversation = window.localStorage.getItem(
@@ -758,7 +793,7 @@ function Home() {
                   ? "◉"
                   : "✿"}
           </span>
-          <span className="demo-tag">DEMO</span>
+          {isDemoCatalog && <span className="demo-tag">DEMO</span>}
         </button>
         <div className="product-card-body">
           <div className="product-category">{product.category}</div>
@@ -805,8 +840,8 @@ function Home() {
             <div className="stock-hint">
               {product.stock_quantity ??
                 product.availability ??
-                "Availability in catalog"}{" "}
-              · Sample product data
+                "Availability in catalog"}
+              {isDemoCatalog && " · Sample product data"}
             </div>
           )}
         </div>
@@ -858,10 +893,10 @@ function Home() {
             setActiveView("chat");
           }}
         >
-          <span className="brand-mark">tn</span>
+          <span className="brand-mark">{storeName.slice(0, 2).toLowerCase()}</span>
           <span>
-            <strong>thai naturals</strong>
-            <small>SKINCARE STUDIO</small>
+            <strong>{storeName}</strong>
+            <small>AI SALES ASSISTANT</small>
           </span>
         </a>
         <div className="sidebar-label">WORKSPACE</div>
@@ -907,14 +942,14 @@ function Home() {
           </div>
         </div>
         <div className="sidebar-foot">
-          Thai Naturals AI · Development preview
+          {storeName} AI · Development preview
         </div>
       </aside>
 
       <section className="main-area">
         <header className="topbar">
           <div className="breadcrumb">
-            <span>Thai Naturals</span>
+            <span>{storeName}</span>
             <b>/</b>
             <strong>
               {activeView === "chat"
@@ -1314,7 +1349,7 @@ function Home() {
                         maxPrice,
                       );
                   }}
-                  placeholder="Max ₹"
+                  placeholder={`Max ${currency}`}
                   aria-label="Maximum price"
                 />
               </div>
@@ -1392,7 +1427,7 @@ function Home() {
                           {product.category}
                         </span>
                         <strong>{product.name}</strong>
-                        <small>{money(product.price)} each</small>
+                        <small>{money(product.price, currency)} each</small>
                       </div>
                       <div className="quantity-controls">
                         <button
@@ -1414,7 +1449,7 @@ function Home() {
                         </button>
                       </div>
                       <strong className="line-total">
-                        {money(product.price * quantity)}
+                        {money(product.price * quantity, currency)}
                       </strong>
                       <button
                         className="remove-item"
@@ -1433,7 +1468,7 @@ function Home() {
                       <span>
                         {product.name} <small>× {quantity}</small>
                       </span>
-                      <strong>{money(product.price * quantity)}</strong>
+                      <strong>{money(product.price * quantity, currency)}</strong>
                     </div>
                   ))}
                   <div className="summary-divider" />
@@ -1537,7 +1572,7 @@ function Home() {
                       <span>
                         {item.product_name} <small>× {item.quantity}</small>
                       </span>
-                      <strong>{money(item.line_total)}</strong>
+                      <strong>{money(item.line_total, currency)}</strong>
                     </div>
                   ))}
                 </div>
@@ -1668,8 +1703,8 @@ function Home() {
               <h2 id="modal-title">{selectedProduct.name}</h2>
               <p>{selectedProduct.description}</p>
               <div className="modal-price">
-                {money(selectedProduct.price)}{" "}
-                <del>{money(selectedProduct.original_price)}</del>
+                {money(selectedProduct.price, currency)}{" "}
+                <del>{money(selectedProduct.original_price, currency)}</del>
               </div>
               <div className="detail-list">
                 <div>
@@ -1700,7 +1735,7 @@ function Home() {
                   setSelectedProduct(null);
                 }}
               >
-                Add to bag · {money(selectedProduct.price)}
+                Add to bag · {money(selectedProduct.price, currency)}
               </button>
             </div>
           </section>

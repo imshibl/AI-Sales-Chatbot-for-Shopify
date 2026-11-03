@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 
 repo = repository
 
 
 class RecommendationService:
-    def __init__(self, repository: MemoryRepository | None = None):
+    def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
-    def get_recommendations(self, *, query: str | None = None, budget: int | None = None,
+    def get_recommendations(self, *, query: str | None = None, budget: float | None = None,
                             skin_type: str | None = None, concern: str | None = None,
                             category: str | None = None, limit: int = 3) -> list[dict]:
         candidates = self.repository.search_products(
@@ -21,7 +22,7 @@ class RecommendationService:
             active_only=True,
         )
 
-        def score(product: dict) -> tuple[int, int, float]:
+        def score(product: dict) -> tuple[int, float, float]:
             text = f"{product['name']} {product['description']} {' '.join(product.get('benefits', []))} {' '.join(product.get('concerns', []))}".lower()
             score = 0
             if query:

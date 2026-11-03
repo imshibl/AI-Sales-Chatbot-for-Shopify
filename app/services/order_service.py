@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.payments.dummy_provider import DummyPaymentProvider
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 from app.services.cart_service import CartService
 
 repo = repository
@@ -11,7 +12,7 @@ cart_service = CartService(repo)
 
 
 class OrderService:
-    def __init__(self, repository: MemoryRepository | None = None, payment_provider=None):
+    def __init__(self, repository: BaseRepository | None = None, payment_provider=None):
         self.repository = repository or repo
         self.payment_provider = payment_provider or _default_payment_provider
         self.cart_service = CartService(self.repository)
@@ -19,7 +20,7 @@ class OrderService:
     def preview_order(self, conversation_id: str, shipping_address: str | None = None) -> dict:
         cart = self.cart_service.validate_cart_for_checkout(conversation_id)
         if not shipping_address:
-            customer = self.repository.customers.get(self.repository.demo_customer_id)
+            customer = self.repository.get_customer(self.repository.demo_customer_id)
             shipping_address = customer.get("shipping_address") if customer else "" 
         return {
             "items": cart["items"],
@@ -243,13 +244,7 @@ class OrderService:
         }
 
     def get_payment_by_reference(self, payment_reference: str) -> dict:
-        order = next(
-            (
-                item for item in self.repository.orders.values()
-                if item.get("payment_reference") == payment_reference
-            ),
-            None,
-        )
+        order = self.repository.get_order_by_payment_reference(payment_reference)
         if not order:
             raise NotFoundError("This demo payment link was not found.")
         order = self.refresh_payment_status(order["id"])

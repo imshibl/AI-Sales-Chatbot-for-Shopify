@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.v1 import cart, chat, orders, payments, products
+from app.api.v1 import cart, chat, config, orders, payments, products
 from app.core.config import settings
 from app.core.exceptions import AppError
 
@@ -32,6 +32,7 @@ def health_check() -> dict:
 
 
 app.include_router(chat.router, prefix=settings.api_prefix)
+app.include_router(config.router, prefix=settings.api_prefix)
 app.include_router(products.router, prefix=settings.api_prefix)
 app.include_router(cart.router, prefix=settings.api_prefix)
 app.include_router(orders.router, prefix=settings.api_prefix)

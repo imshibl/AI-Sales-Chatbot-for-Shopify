@@ -13,7 +13,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'Thai Naturals — Shopping Assistant',
+        title: 'AI Sales Assistant — Shopping Assistant',
       },
     ],
     links: [

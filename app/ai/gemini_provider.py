@@ -19,6 +19,7 @@ def _system_instruction(messages: list[dict[str, Any]]) -> str:
     except OSError as exc:
         logger.exception("Unable to load the Gemini system instruction.")
         raise AIServiceError("The assistant is temporarily unavailable. Please try again shortly.") from exc
+    instruction = instruction.replace("{{STORE_NAME}}", settings.store_name)
     preferences = [
         message["content"].strip()
         for message in messages
@@ -131,9 +132,9 @@ class GeminiProvider(LLMProvider):
             elif status_code in {401, 403}:
                 message = "Gemini rejected the configured API key. Check GEMINI_API_KEY in .env."
             elif "timeout" in type(exc).__name__.lower():
-                message = "The skincare assistant took too long to respond. Please try again."
+                message = "The shopping assistant took too long to respond. Please try again."
             else:
-                message = "I'm having trouble reaching the skincare assistant right now. Please try again in a moment."
+                message = "I'm having trouble reaching the shopping assistant right now. Please try again in a moment."
             raise AIServiceError(
                 message
             ) from exc

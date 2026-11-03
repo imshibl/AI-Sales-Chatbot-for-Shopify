@@ -10,7 +10,8 @@ from app.ai.interfaces import LLMProvider
 from app.ai.tool_registry import TOOL_DECLARATIONS, ToolExecutor
 from app.core.config import settings
 from app.core.exceptions import AIServiceError, NotFoundError, ValidationError
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 from app.services.cart_service import CartService
 from app.services.order_service import OrderService
 from app.services.product_service import ProductService
@@ -24,7 +25,7 @@ order_service = OrderService(repo)
 
 
 class ChatService:
-    def __init__(self, repository: MemoryRepository | None = None, llm_provider: LLMProvider | None = None):
+    def __init__(self, repository: BaseRepository | None = None, llm_provider: LLMProvider | None = None):
         self.repository = repository or repo
         self.product_service = ProductService(self.repository)
         self.recommendation_service = RecommendationService(self.repository)
@@ -45,13 +46,18 @@ class ChatService:
         }
         return self.repository.create_conversation(payload)
 
-    def _parse_max_price(self, text: str) -> int | None:
-        match = re.search(r"under\s*₹?\s*(\d+(?:,\d{3})*(?:\.\d+)?)|under\s*rs\s*(\d+(?:,\d{3})*(?:\.\d+)?)|budget\s*(\d+)", text.lower())
+    def _parse_max_price(self, text: str) -> float | None:
+        match = re.search(
+            r"under\s*[$€£₹]?\s*(\d+(?:,\d{3})*(?:\.\d+)?)"
+            r"|under\s*(?:[a-z]{3}|rs)\s*(\d+(?:,\d{3})*(?:\.\d+)?)"
+            r"|budget\s*[$€£₹]?\s*(\d+(?:,\d{3})*(?:\.\d+)?)",
+            text.lower(),
+        )
         if not match:
             return None
         value = next(group for group in match.groups() if group)
         value = value.replace(",", "")
-        return int(float(value))
+        return float(value)
 
     def _find_product_by_text(self, text: str) -> dict | None:
         needle = text.lower().strip()
@@ -351,7 +357,11 @@ class ChatService:
             "description": product["description"],
             "benefits": product.get("benefits", []),
             "image_url": product.get("image_url"),
-            "availability": "in stock" if product.get("stock_quantity", 0) > 0 else "out of stock",
+            "availability": (
+                "in stock"
+                if product.get("is_active", True) and product.get("stock_quantity") != 0
+                else "out of stock"
+            ),
             "category": product.get("category"),
         }
 
@@ -377,14 +387,14 @@ class ChatService:
             return self._handle_with_llm(conversation, user_message, history, language)
 
         lower = user_message.lower()
-        response_text = "I'm here to help you with your skincare routine."
+        response_text = "I'm here to help you find products."
         product_cards: list[dict] = []
         cart_summary: dict | None = None
         order_summary: dict | None = None
         payment_link: str | None = None
 
         if lower.startswith("hi") or lower.startswith("hello") or lower.startswith("hey"):
-            response_text = "Hi there! 👋 Welcome to Thai Naturals. I can help you find skincare that fits your skin and routine. What are you looking to improve today?"
+            response_text = f"Hi there! 👋 Welcome to {settings.store_name}. I can help you find products that fit your needs. What are you shopping for today?"
         elif "add" in lower and "cart" in lower:
             product = self._find_product_by_text(lower.replace("add", "").replace("to my cart", "").strip())
             if not product:
@@ -393,7 +403,7 @@ class ChatService:
                 cart_summary = self.cart_service.add_item(conversation["conversation_id"], product["id"], quantity=1)
                 response_text = f"Absolutely! I've added {product['name']} to your cart. Would you like to review it or keep shopping?"
             else:
-                response_text = "I couldn't find that product in the Thai Naturals catalog. Tell me the product name or what skin concern you want to target."
+                response_text = f"I couldn't find that product in the {settings.store_name} catalog. Tell me the product name or what you're looking for."
         elif "remove" in lower and "cart" in lower:
             product = self._find_product_by_text(lower.replace("remove", "").replace("from cart", "").strip())
             if product:
@@ -479,14 +489,18 @@ class ChatService:
                     "description": product["description"],
                     "benefits": product.get("benefits", []),
                     "image_url": product.get("image_url"),
-                    "availability": "in stock" if product.get("stock_quantity", 0) > 0 else "out of stock",
+                    "availability": (
+                        "in stock"
+                        if product.get("is_active", True) and product.get("stock_quantity") != 0
+                        else "out of stock"
+                    ),
                     "category": product.get("category"),
                 }
                 for product in results[:3]
             ]
             if results:
                 product_names = ", ".join(item["name"] for item in results[:3])
-                response_text = f"Here are a few Thai Naturals products that match your request: {product_names}. I can help narrow this down further based on your skin type, routine, or budget."
+                response_text = f"Here are a few {settings.store_name} products that match your request: {product_names}. I can help narrow this down based on your preferences or budget."
             else:
                 response_text = "I couldn't find a clear match in the catalog. Tell me your skin type, concern, or budget and I can suggest a few options."
 

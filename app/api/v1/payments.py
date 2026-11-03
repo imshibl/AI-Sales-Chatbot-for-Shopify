@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.repositories.memory import repository as repo
+from app.repositories.factory import repository as repo
 from app.schemas.order import DemoPaymentCompleteRequest
 from app.services.order_service import OrderService
 
