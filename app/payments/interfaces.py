@@ -1,3 +1,5 @@
+"""Contract for payment-link creation and provider status operations."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -5,6 +7,7 @@ from typing import Any
 
 
 class PaymentProvider(ABC):
+    """Interface for replaceable demo or production payment adapters."""
     @abstractmethod
     def create_payment_link(self, order: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError

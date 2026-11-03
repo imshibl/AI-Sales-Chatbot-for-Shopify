@@ -1,3 +1,5 @@
+"""In-process repository used for demos, tests, and local development."""
+
 from __future__ import annotations
 
 import uuid
@@ -9,11 +11,15 @@ from app.repositories.interfaces import BaseRepository
 
 
 def utcnow() -> datetime:
+    """Return timezone-aware timestamps for stored records."""
     return datetime.now(timezone.utc)
 
 
 class MemoryRepository(BaseRepository):
+    """Keep the repository contract in Python dictionaries without persistence."""
+
     def __init__(self) -> None:
+        # Seed the demo catalog and shared demo customer; all other records start empty.
         self.products: dict[str, dict[str, Any]] = {product["id"]: product for product in sample_products()}
         self.customers: dict[str, dict[str, Any]] = {}
         self.orders: dict[str, dict[str, Any]] = {}
@@ -29,6 +35,7 @@ class MemoryRepository(BaseRepository):
         }
         self.customers[self._demo_customer["id"]] = self._demo_customer
 
+    # Catalog reads return copies so callers cannot mutate stored products by accident.
     def list_products(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         items = list(self.products.values())
         if active_only:
@@ -46,7 +53,7 @@ class MemoryRepository(BaseRepository):
         category: str | None = None,
         skin_type: str | None = None,
         concern: str | None = None,
-        max_price: int | None = None,
+        max_price: float | None = None,
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
         results = list(self.products.values())
@@ -60,7 +67,7 @@ class MemoryRepository(BaseRepository):
         if concern:
             results = [p for p in results if concern.lower() in [x.lower() for x in p.get("concerns", [])]]
         if max_price is not None:
-            results = [p for p in results if int(p.get("price", 0)) <= int(max_price)]
+            results = [p for p in results if float(p.get("price", 0)) <= max_price]
         if q:
             results = [
                 p
@@ -75,6 +82,7 @@ class MemoryRepository(BaseRepository):
             ]
         return [dict(p) for p in results]
 
+    # Customer records back the demo checkout flow.
     def create_customer(self, payload: dict[str, Any]) -> dict[str, Any]:
         customer_id = payload.get("id") or str(uuid.uuid4())
         customer = {
@@ -92,6 +100,7 @@ class MemoryRepository(BaseRepository):
         customer = self.customers.get(customer_id)
         return dict(customer) if customer else None
 
+    # Conversation records hold chat history, cart contents, and pending checkout state.
     def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
         conversation = self.conversations.get(conversation_id)
         if conversation is None:
@@ -123,6 +132,7 @@ class MemoryRepository(BaseRepository):
     def delete_conversation(self, conversation_id: str) -> None:
         self.conversations.pop(conversation_id, None)
 
+    # Order records retain checkout snapshots and demo payment/tracking state.
     def create_order(self, payload: dict[str, Any]) -> dict[str, Any]:
         order_id = payload.get("id") or f"TN-{uuid.uuid4().hex[:8].upper()}"
         created = {
@@ -153,6 +163,13 @@ class MemoryRepository(BaseRepository):
         order = self.orders.get(order_id)
         return dict(order) if order else None
 
+    def get_order_by_payment_reference(self, payment_reference: str) -> dict[str, Any] | None:
+        order = next(
+            (item for item in self.orders.values() if item.get("payment_reference") == payment_reference),
+            None,
+        )
+        return dict(order) if order else None
+
     def get_order_by_customer(self, customer_id: str) -> list[dict[str, Any]]:
         return [dict(order) for order in self.orders.values() if order.get("customer_id") == customer_id]
 
@@ -168,6 +185,3 @@ class MemoryRepository(BaseRepository):
     @property
     def demo_customer_id(self) -> str:
         return self._demo_customer["id"]
-
-
-repository = MemoryRepository()

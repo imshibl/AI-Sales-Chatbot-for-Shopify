@@ -1,9 +1,13 @@
+"""Demo product and policy fixtures used by the in-memory and SQL demo stores."""
+
 from __future__ import annotations
 
 from typing import Any
 
 
 def sample_products() -> list[dict[str, Any]]:
+    """Return fresh sample catalog entries in the normalized product shape."""
+    # Keep demo fields aligned with the canonical catalog adapter output.
     return [
         {
             "id": "prod_001",
@@ -233,6 +237,7 @@ def sample_products() -> list[dict[str, Any]]:
 
 
 def sample_store_policies() -> dict[str, Any]:
+    """Return demo-only shipping, returns, and support policy content."""
     return {
         "shipping": {
             "free_shipping_threshold": 1499,

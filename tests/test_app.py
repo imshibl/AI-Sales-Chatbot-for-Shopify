@@ -12,6 +12,16 @@ def test_health_endpoint():
     assert payload["status"] == "ok"
 
 
+def test_public_store_config_exposes_brand_and_currency_only():
+    response = client.get("/api/v1/config")
+    assert response.status_code == 200
+    assert response.json() == {
+        "store_name": "Thai Naturals",
+        "currency": "INR",
+        "is_demo_catalog": True,
+    }
+
+
 def test_product_listing_and_search():
     list_response = client.get("/api/v1/products")
     assert list_response.status_code == 200

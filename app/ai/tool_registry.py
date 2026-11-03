@@ -1,3 +1,5 @@
+"""Declare model-callable actions and execute them through validated services."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,14 +8,16 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError, field_validator
 
+from app.core.config import settings
 from app.core.exceptions import AppError
-from app.repositories.memory import MemoryRepository
+from app.repositories.interfaces import BaseRepository
 from app.services.cart_service import CartService
 from app.services.order_service import OrderService
 from app.services.product_service import ProductService
 from app.services.recommendation_service import RecommendationService
 
 
+# Strict argument models reject unexpected or malformed model-generated fields.
 class ToolArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -27,7 +31,7 @@ class ProductSearchArguments(ToolArguments):
     category: str | None = None
     skin_type: str | None = None
     concern: str | None = None
-    max_price: int | None = Field(default=None, ge=0)
+    max_price: float | None = Field(default=None, ge=0)
 
 
 class ProductDetailsArguments(ToolArguments):
@@ -80,10 +84,12 @@ class CheckoutArguments(ToolArguments):
         return value
 
 
+# Provider-neutral tool schemas describe allowed actions without executing them.
 TOOL_DECLARATIONS: list[dict[str, Any]] = [
+    # Catalog lookup and recommendation actions return verified store data.
     {
         "name": "search_products",
-        "description": "Search the live Thai Naturals demo catalog. Returns only real catalog products.",
+        "description": "Search the connected store catalog. Returns only real catalog products.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -91,7 +97,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "category": {"type": "STRING", "description": "Product category such as cleanser, serum, toner, moisturizer, sunscreen, or face mask."},
                 "skin_type": {"type": "STRING", "description": "Skin type filter such as oily, dry, combination, sensitive, or normal."},
                 "concern": {"type": "STRING", "description": "Catalog concern filter, such as dryness, dullness, oiliness, or acne marks."},
-                "max_price": {"type": "INTEGER", "description": "Maximum price in INR."},
+                "max_price": {"type": "NUMBER", "description": f"Maximum price in {settings.currency}."},
             },
         },
     },
@@ -105,7 +111,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
                 "category": {"type": "STRING", "description": "Optional product category."},
                 "skin_type": {"type": "STRING", "description": "The customer's stated skin type."},
                 "concern": {"type": "STRING", "description": "A concern represented in catalog data."},
-                "max_price": {"type": "INTEGER", "description": "Maximum price in INR."},
+                "max_price": {"type": "NUMBER", "description": f"Maximum price in {settings.currency}."},
             },
         },
     },
@@ -135,6 +141,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
             "required": ["product_ids"],
         },
     },
+    # Cart actions are scoped to the current conversation and use repository prices.
     {
         "name": "get_cart",
         "description": "Get the current conversation's cart. Do not request or provide a conversation ID.",
@@ -183,6 +190,7 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
         "description": "Get the configured demo shipping policy.",
         "parameters": {"type": "OBJECT", "properties": {}},
     },
+    # Order and payment actions enforce explicit confirmation and provider verification.
     {
         "name": "get_order_status",
         "description": "Get an order's status only for the current demo customer. Ask for the order ID if it is not known.",
@@ -260,9 +268,11 @@ TOOL_DECLARATIONS: list[dict[str, Any]] = [
 
 
 class ToolExecutor:
+    """Validate model requests, invoke business services, and shape safe results."""
+
     def __init__(
         self,
-        repository: MemoryRepository,
+        repository: BaseRepository,
         conversation_id: str,
         customer_id: str,
         current_user_message: str = "",
@@ -280,6 +290,7 @@ class ToolExecutor:
 
     @staticmethod
     def _explicitly_confirmed(message: str) -> bool:
+        # Restrict order placement to clear standalone confirmations in supported languages.
         normalized = re.sub(r"[\s.!?,;:]+", " ", message.lower()).strip()
         confirmations = {
             "yes", "yes please", "yes i confirm", "yes confirm", "yes place the order",
@@ -299,6 +310,7 @@ class ToolExecutor:
         return normalized in confirmations
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        # Only declared tools with a matching Pydantic schema can reach services.
         validators = {
             "search_products": ProductSearchArguments,
             "get_product_recommendations": ProductSearchArguments,
@@ -441,6 +453,7 @@ class ToolExecutor:
 
     @staticmethod
     def _public_order_status(order: dict[str, Any]) -> dict[str, Any]:
+        """Remove internal fields before an order status is sent back to the model."""
         return {
             "id": order["id"],
             "created_at": order.get("created_at"),

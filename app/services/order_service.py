@@ -1,8 +1,11 @@
+"""Prepare confirmed orders, create demo payment links, and refresh order status."""
+
 from __future__ import annotations
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.payments.dummy_provider import DummyPaymentProvider
-from app.repositories.memory import MemoryRepository, repository
+from app.repositories.factory import repository
+from app.repositories.interfaces import BaseRepository
 from app.services.cart_service import CartService
 
 repo = repository
@@ -11,7 +14,9 @@ cart_service = CartService(repo)
 
 
 class OrderService:
-    def __init__(self, repository: MemoryRepository | None = None, payment_provider=None):
+    """Coordinate cart validation, persisted order records, and payment provider calls."""
+
+    def __init__(self, repository: BaseRepository | None = None, payment_provider=None):
         self.repository = repository or repo
         self.payment_provider = payment_provider or _default_payment_provider
         self.cart_service = CartService(self.repository)
@@ -19,7 +24,7 @@ class OrderService:
     def preview_order(self, conversation_id: str, shipping_address: str | None = None) -> dict:
         cart = self.cart_service.validate_cart_for_checkout(conversation_id)
         if not shipping_address:
-            customer = self.repository.customers.get(self.repository.demo_customer_id)
+            customer = self.repository.get_customer(self.repository.demo_customer_id)
             shipping_address = customer.get("shipping_address") if customer else "" 
         return {
             "items": cart["items"],
@@ -42,6 +47,7 @@ class OrderService:
         shipping_address: str,
         turn_id: str,
     ) -> dict:
+        # Save a price snapshot so later confirmation cannot silently approve changed totals.
         contact = {
             "customer_name": customer_name.strip(),
             "email": email.strip(),
@@ -90,6 +96,7 @@ class OrderService:
         confirmed: bool,
         customer_id: str | None = None,
     ) -> dict:
+        # Require a later-turn confirmation and an unchanged cart before order creation.
         conversation = self.repository.get_conversation(conversation_id)
         if not conversation:
             raise NotFoundError(f"Conversation '{conversation_id}' was not found.")
@@ -131,6 +138,7 @@ class OrderService:
         email: str | None = None,
         phone: str | None = None,
     ) -> dict:
+        # The API and AI tool share this path, so confirmation/contact checks stay centralized.
         if not confirmed:
             raise ValidationError("Order creation requires explicit customer confirmation.")
         if not all(value and value.strip() for value in (customer_name, email, phone, shipping_address)):
@@ -212,6 +220,7 @@ class OrderService:
         }
 
     def refresh_payment_status(self, order_id: str, customer_id: str | None = None) -> dict:
+        # Provider status is authoritative; customer text never marks an order as paid.
         order = self.get_order(order_id, customer_id=customer_id)
         if order.get("payment_status") == "paid":
             return order
@@ -243,13 +252,7 @@ class OrderService:
         }
 
     def get_payment_by_reference(self, payment_reference: str) -> dict:
-        order = next(
-            (
-                item for item in self.repository.orders.values()
-                if item.get("payment_reference") == payment_reference
-            ),
-            None,
-        )
+        order = self.repository.get_order_by_payment_reference(payment_reference)
         if not order:
             raise NotFoundError("This demo payment link was not found.")
         order = self.refresh_payment_status(order["id"])
@@ -287,6 +290,7 @@ class OrderService:
         return updated
 
     def _mark_order_paid(self, order_id: str) -> dict:
+        """Apply the demo fulfillment transition after the provider confirms payment."""
         tracking_number = "TN-TRACK-" + order_id.split("-")[-1]
         return self.repository.update_order(
             order_id,

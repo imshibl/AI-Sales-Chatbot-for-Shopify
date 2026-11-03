@@ -1,3 +1,5 @@
+"""Validated checkout and demo-payment request payloads."""
+
 from __future__ import annotations
 
 import re
@@ -6,11 +8,15 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class OrderPreviewRequest(BaseModel):
+    """Request a price-and-shipping preview for a conversation cart."""
+
     conversation_id: str
     shipping_address: str | None = None
 
 
 class OrderConfirmationRequest(BaseModel):
+    """Capture delivery contact details and require explicit order confirmation."""
+
     conversation_id: str
     customer_id: str | None = None
     shipping_address: str = Field(min_length=10, max_length=500)
@@ -40,10 +46,14 @@ class OrderConfirmationRequest(BaseModel):
 
 
 class DemoPaymentSimulateRequest(BaseModel):
+    """Identify an optional demo payment reference for simulator requests."""
+
     payment_reference: str | None = None
 
 
 class DemoPaymentCompleteRequest(BaseModel):
+    """Restrict the demo simulator to its supported payment outcomes."""
+
     outcome: str
 
     @field_validator("outcome")

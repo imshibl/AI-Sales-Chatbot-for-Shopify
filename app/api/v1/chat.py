@@ -1,16 +1,18 @@
+"""HTTP endpoints for sending chat turns and managing conversation history."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
 from app.core.exceptions import AppError
-from app.repositories.memory import repository as repo
+from app.repositories.factory import repository as repo
 from app.schemas.chat import ChatHistoryResponse, ChatMessageRequest
 from app.services.chat_service import ChatService
 
 router = APIRouter()
 service = ChatService(repo)
 
-
+# Chat generation and its domain errors are handled by the service layer.
 @router.post("/chat")
 def chat(payload: ChatMessageRequest):
     try:
@@ -22,7 +24,7 @@ def chat(payload: ChatMessageRequest):
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"message": exc.message, "error_code": exc.error_code}) from exc
 
-
+# History and deletion use the shared repository directly because they are record reads.
 @router.get("/chat/{conversation_id}/history")
 def chat_history(conversation_id: str):
     conversation = repo.get_conversation(conversation_id)

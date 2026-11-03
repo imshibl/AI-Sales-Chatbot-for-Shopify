@@ -1,1 +1,1 @@
-"""Thai Naturals AI shopping assistant application package."""
+"""Open-source AI sales assistant application package."""
