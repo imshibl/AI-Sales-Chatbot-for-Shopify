@@ -1,3 +1,5 @@
+"""Business operations for product search, lookup, and store policies."""
+
 from __future__ import annotations
 
 from app.core.exceptions import NotFoundError
@@ -8,6 +10,8 @@ repo = repository
 
 
 class ProductService:
+    """Apply service-level behavior over the configured product repository."""
+
     def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
@@ -44,6 +48,7 @@ class ProductService:
         return results
 
     def get_shipping_policy(self) -> dict:
+        """Return configured shipping rules for checkout and assistant tools."""
         return self.repository.store_policies.get("shipping", {})
 
     def get_store_policies(self) -> dict:

@@ -1,3 +1,5 @@
+"""In-memory payment simulator for local checkout demonstrations only."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,6 +8,8 @@ from app.payments.interfaces import PaymentProvider
 
 
 class DummyPaymentProvider(PaymentProvider):
+    """Generate local demo references and simulate payment status transitions."""
+
     def __init__(self) -> None:
         self._statuses: dict[str, str] = {}
 

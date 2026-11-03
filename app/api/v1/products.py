@@ -1,3 +1,5 @@
+"""HTTP endpoints for listing, filtering, and retrieving catalog products."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,7 +11,7 @@ from app.repositories.factory import repository as repo
 router = APIRouter()
 service = ProductService(repo)
 
-
+# Catalog HTTP handlers keep query parsing separate from search behavior.
 @router.get("/products")
 def list_products(category: str | None = None, skin_type: str | None = None,
                   concern: str | None = None, max_price: float | None = Query(default=None, ge=0),

@@ -1,3 +1,5 @@
+"""Adapt chat history and tool declarations to Google's Gemini Gen AI SDK."""
+
 from __future__ import annotations
 
 import base64
@@ -13,6 +15,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT_PATH = Path(__file__).with_name("system_prompt.md")
 
 
+# Combine the store-specific instruction with per-conversation language preferences.
 def _system_instruction(messages: list[dict[str, Any]]) -> str:
     try:
         instruction = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
@@ -29,7 +32,7 @@ def _system_instruction(messages: list[dict[str, Any]]) -> str:
         instruction += "\n\nConversation preferences:\n" + "\n".join(preferences)
     return instruction
 
-
+# Convert the app's provider-neutral history into Gemini content and function parts.
 def _gemini_contents(messages: list[dict[str, Any]], types: Any) -> list[Any]:
     contents = []
     for message in messages:
@@ -74,6 +77,8 @@ def _gemini_contents(messages: list[dict[str, Any]], types: Any) -> list[Any]:
 
 
 class GeminiProvider(LLMProvider):
+    """Call Gemini and convert its text/tool response back to app types."""
+
     def __init__(self) -> None:
         if not settings.gemini_api_key.strip():
             raise AIServiceError("Gemini is selected, but GEMINI_API_KEY is not configured.")
@@ -99,6 +104,7 @@ class GeminiProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> AIResponse:
+        # Disable automatic tool execution; every action must pass through ToolExecutor.
         gemini_tools = None
         if tools:
             declarations = [
@@ -116,6 +122,7 @@ class GeminiProvider(LLMProvider):
             tools=gemini_tools,
             automatic_function_calling=self._types.AutomaticFunctionCallingConfig(disable=True),
         )
+        # Send normalized history and tool schemas; app code executes returned tool calls.
         try:
             response = self._client.models.generate_content(
                 model=self._model,
@@ -139,6 +146,7 @@ class GeminiProvider(LLMProvider):
                 message
             ) from exc
 
+        # Reject empty/malformed provider output instead of fabricating a response.
         candidate = next(
             (
                 item
@@ -153,6 +161,7 @@ class GeminiProvider(LLMProvider):
                 "I couldn't prepare a response just now. Please try again or browse the catalog."
             )
 
+        # Split provider output into plain text and validated structured action requests.
         content_parts = candidate.content.parts or []
         text = "\n".join(part.text for part in content_parts if part.text).strip()
         calls = []

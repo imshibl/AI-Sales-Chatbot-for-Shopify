@@ -1,3 +1,5 @@
+"""Format order tracking data while enforcing the requested customer scope."""
+
 from __future__ import annotations
 
 from app.core.exceptions import NotFoundError, ValidationError
@@ -8,6 +10,8 @@ repo = repository
 
 
 class TrackingService:
+    """Resolve an order and return its available tracking details."""
+
     def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 

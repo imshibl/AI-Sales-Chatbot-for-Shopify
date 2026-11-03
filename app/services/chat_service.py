@@ -1,3 +1,5 @@
+"""Orchestrate chat history, AI tool calls, product cards, and offline replies."""
+
 from __future__ import annotations
 
 import json
@@ -25,6 +27,8 @@ order_service = OrderService(repo)
 
 
 class ChatService:
+    """Coordinate a chat turn across the configured model and business services."""
+
     def __init__(self, repository: BaseRepository | None = None, llm_provider: LLMProvider | None = None):
         self.repository = repository or repo
         self.product_service = ProductService(self.repository)
@@ -70,6 +74,7 @@ class ChatService:
         return None
 
     def _llm_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Rebuild alternating assistant/tool messages in the format expected by providers.
         messages: list[dict[str, Any]] = []
         for message in history[-settings.chat_history_limit :]:
             role = message.get("role")
@@ -105,6 +110,7 @@ class ChatService:
         history: list[dict[str, Any]],
         language: str,
     ) -> dict[str, Any]:
+        # Each tool execution is bound to this conversation and user turn.
         conversation_id = conversation["conversation_id"]
         customer_id = conversation.get("customer_id") or self.repository.demo_customer_id
         turn_id = uuid.uuid4().hex
@@ -152,6 +158,7 @@ class ChatService:
         checkout_prepared = False
         assistant_finalized = False
 
+        # Bound model/tool rounds so a faulty model cannot create an endless tool loop.
         for round_index in range(5):
             try:
                 response = self.llm_provider.generate_response(messages, tools=TOOL_DECLARATIONS)
@@ -247,6 +254,7 @@ class ChatService:
         else:
             raise AIServiceError("I couldn't prepare a response just now. Please try again.")
 
+        # Enforce critical checkout/payment facts even if generated prose omits them.
         if created_order and created_order["payment_url"] not in response_text:
             response_text = (
                 f"{response_text}\n\nOrder {created_order['id']} is awaiting payment. "
@@ -332,6 +340,7 @@ class ChatService:
         result: dict[str, Any],
         products_by_id: dict[str, dict[str, Any]],
     ) -> None:
+        """Collect only verified products returned by catalog tools for UI cards."""
         if "error" in result:
             return
         if tool_name in {"search_products", "get_product_recommendations"}:
@@ -372,6 +381,7 @@ class ChatService:
         customer_id: str | None = None,
         language: str = "en",
     ) -> dict[str, Any]:
+        # Validate common request state before creating history or invoking providers.
         if not user_message or not user_message.strip():
             raise ValidationError("Message cannot be empty.")
         if language not in {"en", "ta", "ml", "hi"}:
@@ -383,6 +393,7 @@ class ChatService:
         history = conversation.get("messages", [])
         history.append({"role": "user", "content": user_message, "timestamp": datetime.now(timezone.utc).isoformat()})
 
+        # Offline mode remains a small deterministic demo, not an order/payment processor.
         if self.use_llm:
             return self._handle_with_llm(conversation, user_message, history, language)
 

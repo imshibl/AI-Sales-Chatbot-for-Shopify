@@ -1,3 +1,5 @@
+"""HTTP endpoints for reading and mutating a conversation's cart."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -10,7 +12,7 @@ from app.services.cart_service import CartService
 router = APIRouter()
 service = CartService(repo)
 
-
+# Each handler delegates business rules to CartService and maps domain errors to HTTP.
 @router.get("/cart/{conversation_id}")
 def get_cart(conversation_id: str):
     try:

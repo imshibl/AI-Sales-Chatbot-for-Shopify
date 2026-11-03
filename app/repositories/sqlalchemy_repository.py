@@ -1,3 +1,5 @@
+"""SQLAlchemy-backed persistence for conversations, customers, and orders."""
+
 from __future__ import annotations
 
 import uuid
@@ -12,15 +14,19 @@ from app.data.seed import sample_products, sample_store_policies
 
 
 def utcnow() -> str:
+    """Serialize a timezone-aware timestamp for JSON storage."""
     return datetime.now(timezone.utc).isoformat()
 
 
 class SQLAlchemyRepository:
+    """Persist repository entities as JSON payloads in relational tables."""
+
     def __init__(self, database_url: str):
         if not database_url.strip():
             raise ValueError("DATABASE_URL is required when STORAGE_BACKEND=sql.")
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
         self.engine: Engine = create_engine(database_url, connect_args=connect_args)
+        # Keep application records in separate tables while allowing schema evolution.
         metadata = MetaData()
         self.products = self._entity_table(metadata, "products")
         self.customers = self._entity_table(metadata, "customers")
@@ -48,6 +54,7 @@ class SQLAlchemyRepository:
         )
 
     def _initialize_defaults(self) -> None:
+        """Seed the demo catalog/customer only when their tables are empty."""
         with self.engine.begin() as connection:
             if connection.execute(select(self.products.c.id).limit(1)).first() is None:
                 connection.execute(insert(self.products), [{"id": item["id"], "payload": item} for item in sample_products()])
@@ -56,6 +63,7 @@ class SQLAlchemyRepository:
 
     @staticmethod
     def _key(table: Table, payload: dict[str, Any]) -> str:
+        """Use conversation_id for conversations and id for other entity tables."""
         key_name = "conversation_id" if table.name == "conversations" else "id"
         value = payload.get(key_name)
         if not value:
@@ -75,6 +83,7 @@ class SQLAlchemyRepository:
         return [dict(row) for row in rows]
 
     def _save(self, table: Table, payload: dict[str, Any]) -> dict[str, Any]:
+        """Insert or replace one JSON entity inside a database transaction."""
         value = dict(payload)
         key = self._key(table, value)
         with self.engine.begin() as connection:
@@ -85,6 +94,7 @@ class SQLAlchemyRepository:
                 connection.execute(insert(table).values(id=key, payload=value))
         return value
 
+    # Catalog operations preserve the same filtering semantics as MemoryRepository.
     def list_products(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         products = self._all(self.products)
         return [product for product in products if not active_only or product.get("is_active")]
@@ -125,6 +135,7 @@ class SQLAlchemyRepository:
             ]
         return results
 
+    # Customer and conversation operations implement the service-facing repository API.
     def create_customer(self, payload: dict[str, Any]) -> dict[str, Any]:
         customer_id = str(payload.get("id") or uuid.uuid4())
         customer = {
@@ -168,6 +179,7 @@ class SQLAlchemyRepository:
         with self.engine.begin() as connection:
             connection.execute(self.conversations.delete().where(self.conversations.c.id == conversation_id))
 
+    # Order operations include a payment-reference lookup for the demo payment page.
     def create_order(self, payload: dict[str, Any]) -> dict[str, Any]:
         order_id = str(payload.get("id") or f"TN-{uuid.uuid4().hex[:8].upper()}")
         now = utcnow()

@@ -1,3 +1,5 @@
+"""Manage validated cart mutations and backend-calculated checkout totals."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -11,6 +13,8 @@ repo = repository
 
 
 class CartService:
+    """Read and update cart state stored on the owning conversation."""
+
     def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
@@ -27,6 +31,7 @@ class CartService:
         return conversation
 
     def add_item(self, conversation_id: str, product_id: str, quantity: int = 1) -> dict:
+        # Re-read catalog availability and stock on every mutation; unknown stock is not guessed.
         conversation = self._ensure_conversation(conversation_id)
         product = self.repository.get_product(product_id)
         if not product:
@@ -82,6 +87,7 @@ class CartService:
         return cart
 
     def calculate_total(self, conversation_id: str, shipping_fee: float | int | None = None) -> dict:
+        # Decimal arithmetic avoids binary floating-point errors in line items and totals.
         conversation = self._ensure_conversation(conversation_id)
         cart = conversation.get("cart", {})
         items = []
@@ -120,6 +126,7 @@ class CartService:
         }
 
     def validate_cart_for_checkout(self, conversation_id: str) -> dict:
+        # Checkout revalidates every line because catalog availability may have changed.
         conversation = self._ensure_conversation(conversation_id)
         cart = conversation.get("cart", {})
         if not cart:
@@ -146,4 +153,5 @@ class CartService:
 
 
 def _json_amount(value: Decimal) -> int | float:
+    """Return JSON-friendly money without adding decimal places to whole amounts."""
     return int(value) if value == value.to_integral_value() else float(value)

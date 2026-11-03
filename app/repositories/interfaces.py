@@ -1,9 +1,13 @@
+"""Structural contract shared by storage backends and service consumers."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol
 
 
 class BaseRepository(Protocol):
+    """Describe catalog, customer, conversation, and order operations."""
+
     def list_products(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         ...
 

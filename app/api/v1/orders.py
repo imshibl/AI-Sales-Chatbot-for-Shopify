@@ -1,3 +1,5 @@
+"""HTTP endpoints for order previews, creation, status, and tracking."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -10,7 +12,7 @@ from app.services.order_service import OrderService
 router = APIRouter()
 service = OrderService(repo)
 
-
+# Checkout routes delegate pricing and confirmation rules to OrderService.
 @router.post("/orders/preview")
 def preview_order(payload: OrderPreviewRequest):
     try:
@@ -34,7 +36,7 @@ def create_order(payload: OrderConfirmationRequest):
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"message": exc.message, "error_code": exc.error_code}) from exc
 
-
+# Read routes refresh payment state before returning current order information.
 @router.get("/orders")
 def list_orders():
     try:

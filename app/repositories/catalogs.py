@@ -1,3 +1,5 @@
+"""Adapters that normalize memory, Shopify, custom API, and SQL product catalogs."""
+
 from __future__ import annotations
 
 import logging
@@ -20,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 class ProductCatalog:
+    """Common search behavior for catalog sources that return normalized products."""
+
     def list_products(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         raise NotImplementedError
 
@@ -58,6 +62,8 @@ class ProductCatalog:
 
 
 class MemoryProductCatalog(ProductCatalog):
+    """Expose the configured storage repository's catalog as a catalog adapter."""
+
     def __init__(self, repository: BaseRepository):
         self.repository = repository
 
@@ -72,6 +78,8 @@ class MemoryProductCatalog(ProductCatalog):
 
 
 class CachedProductCatalog(ProductCatalog):
+    """Cache external catalog reads for a short TTL to reduce upstream traffic."""
+
     def __init__(self, cache_seconds: int):
         self.cache_seconds = max(cache_seconds, 0)
         self._cached_products: list[dict[str, Any]] | None = None
@@ -92,6 +100,8 @@ class CachedProductCatalog(ProductCatalog):
 
 
 class ShopifyProductCatalog(CachedProductCatalog):
+    """Read published products through the Shopify Storefront GraphQL API."""
+
     def __init__(self, domain: str, access_token: str, api_version: str, cache_seconds: int):
         super().__init__(cache_seconds)
         parsed_domain = urlparse(f"https://{domain.strip()}")
@@ -105,6 +115,7 @@ class ShopifyProductCatalog(CachedProductCatalog):
     def load_products(self) -> list[dict[str, Any]]:
         products: list[dict[str, Any]] = []
         cursor: str | None = None
+        # Cursor pagination prevents large catalogs from being silently truncated.
         query = """
         query Products($cursor: String) {
           products(first: 250, after: $cursor) {
@@ -154,6 +165,7 @@ class ShopifyProductCatalog(CachedProductCatalog):
 
     @staticmethod
     def _map_product(source: dict[str, Any]) -> dict[str, Any]:
+        """Translate Shopify fields into the app's shared product schema."""
         tags = source.get("tags", [])
         price = source["priceRange"]["minVariantPrice"]["amount"]
         try:
@@ -183,6 +195,8 @@ class ShopifyProductCatalog(CachedProductCatalog):
 
 
 class RESTProductCatalog(CachedProductCatalog):
+    """Read canonical products from a merchant REST or GraphQL endpoint."""
+
     def __init__(
         self,
         url: str,
@@ -205,6 +219,7 @@ class RESTProductCatalog(CachedProductCatalog):
         self.graphql_query = graphql_query
 
     def load_products(self) -> list[dict[str, Any]]:
+        # Custom GraphQL responses may be lists or the common edges/node connection shape.
         headers = {"Authorization": "Bearer " + self.token} if self.token else {}
         try:
             if self.api_type == "graphql":
@@ -242,6 +257,8 @@ class RESTProductCatalog(CachedProductCatalog):
 
 
 class SQLProductCatalog(CachedProductCatalog):
+    """Run an operator-supplied SELECT against a separate product database."""
+
     def __init__(self, database_url: str, query: str, cache_seconds: int):
         super().__init__(cache_seconds)
         if not database_url.strip():
@@ -262,6 +279,7 @@ class SQLProductCatalog(CachedProductCatalog):
 
 
 def _normalize_product(source: Any) -> dict[str, Any]:
+    """Validate external fields and fill optional values expected by app services."""
     if not isinstance(source, dict):
         raise IntegrationError("Each catalog product must be an object.")
     if source.get("id") is None or source.get("name") is None:
@@ -320,6 +338,7 @@ def _normalize_product(source: Any) -> dict[str, Any]:
 
 
 def _amount(value: Decimal) -> int | float:
+    """Keep whole prices as integers while preserving valid fractional prices."""
     if not value.is_finite() or value < 0:
         raise ValueError("Price must be a non-negative finite amount.")
     if value == value.to_integral_value():
@@ -331,6 +350,8 @@ def _amount(value: Decimal) -> int | float:
 
 
 class CatalogRepository:
+    """Combine catalog reads with customer/order/conversation storage operations."""
+
     def __init__(self, storage: BaseRepository, catalog: ProductCatalog):
         self.storage = storage
         self.catalog = catalog
@@ -349,6 +370,7 @@ class CatalogRepository:
 
 
 def create_catalog(storage: BaseRepository) -> ProductCatalog:
+    """Construct the product adapter selected by CATALOG_PROVIDER."""
     provider = settings.catalog_provider.lower()
     if provider == "memory":
         return MemoryProductCatalog(storage)

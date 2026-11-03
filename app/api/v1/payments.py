@@ -1,3 +1,5 @@
+"""Development-only endpoints for inspecting and simulating demo payments."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -11,7 +13,7 @@ from app.services.order_service import OrderService
 router = APIRouter()
 service = OrderService(repo)
 
-
+# Guard every simulator route so it can be disabled outside development.
 @router.get("/demo/payments/{payment_reference}")
 def get_demo_payment(payment_reference: str):
     if not settings.enable_demo_payment_endpoint:

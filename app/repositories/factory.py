@@ -1,3 +1,5 @@
+"""Construct the configured storage backend and decorate it with a product catalog."""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +11,8 @@ from app.repositories.sqlalchemy_repository import SQLAlchemyRepository
 
 
 def create_repository() -> CatalogRepository:
+    """Select storage, apply store policies, and attach the configured catalog source."""
+    # Application state and product data can use different backends.
     backend = settings.storage_backend.lower()
     if backend == "memory":
         storage = MemoryRepository()
@@ -16,6 +20,7 @@ def create_repository() -> CatalogRepository:
         storage = SQLAlchemyRepository(settings.database_url)
     else:
         raise ValueError("STORAGE_BACKEND must be either 'memory' or 'sql'.")
+    # Explicit merchant policies override defaults; external stores never inherit demo policy text.
     if settings.store_policies_json.strip():
         try:
             policies = json.loads(settings.store_policies_json)

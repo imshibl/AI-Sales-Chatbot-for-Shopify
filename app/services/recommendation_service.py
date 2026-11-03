@@ -1,3 +1,5 @@
+"""Rank catalog matches against a shopper's preferences and budget."""
+
 from __future__ import annotations
 
 from app.repositories.factory import repository
@@ -7,6 +9,8 @@ repo = repository
 
 
 class RecommendationService:
+    """Select and score products using only product data in the repository."""
+
     def __init__(self, repository: BaseRepository | None = None):
         self.repository = repository or repo
 
@@ -23,6 +27,7 @@ class RecommendationService:
         )
 
         def score(product: dict) -> tuple[int, float, float]:
+            # Stable, explainable signals prioritize stated needs before popularity/price.
             text = f"{product['name']} {product['description']} {' '.join(product.get('benefits', []))} {' '.join(product.get('concerns', []))}".lower()
             score = 0
             if query:
